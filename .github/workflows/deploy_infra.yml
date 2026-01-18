@@ -1,10 +1,9 @@
 name: Deploy Infrastructure
 
 on:
-  workflow_dispatch: # Allows you to click a button to run this manually
+  workflow_dispatch:
 
 env:
-  # Path to your Terraform code
   TF_WORKING_DIR: 'ManagedServices/alphv_blackcat/Resources/setup/provision/terraform/msr2'
   AWS_REGION: 'us-east-1'
 
@@ -25,7 +24,7 @@ jobs:
           terraform_version: 1.5.0
 
       - name: Generate SSH Keys
-        # We generate a key on the fly so we don't have to manage files
+        # Generate the key and save it to a specific file
         run: |
           mkdir -p ~/.ssh
           ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""
@@ -37,11 +36,10 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }} # Needed for Torque/Sandbox accounts
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Remove Remote Backend Config
-        # We delete backend.tf to force local state storage, making it easier to manage artifacts
         run: rm -f backend.tf
         working-directory: ${{ env.TF_WORKING_DIR }}
         continue-on-error: true
@@ -51,8 +49,6 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
 
       - name: Terraform Apply
-        # We map the generic LAB_PASSWORD to all the required variables
-        # We also pass the path to the SSH key we just generated
         run: |
           terraform apply -auto-approve \
             -var="ssh_public_key_path=~/.ssh/id_rsa.pub" \
@@ -68,8 +64,16 @@ jobs:
             -var="aws-bucket-name=unused-bucket-placeholder"
         working-directory: ${{ env.TF_WORKING_DIR }}
 
+      # --- NEW STEP ADDED BELOW ---
+      - name: Upload SSH Key
+        uses: actions/upload-artifact@v4
+        with:
+          name: lab-ssh-key
+          path: ~/.ssh/id_rsa
+          if-no-files-found: error
+      # ----------------------------
+
       - name: Upload Terraform State
-        # CRITICAL: We save the state file so we can destroy the lab later!
         uses: actions/upload-artifact@v4
         with:
           name: terraform-state
