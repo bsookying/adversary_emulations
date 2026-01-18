@@ -28,7 +28,12 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # We download the state file from the previous "Deploy" run so Terraform knows what to delete
+      # FIX: We must delete this file so Terraform uses the local state we download below
+      - name: Remove Remote Backend Config
+        run: rm -f backend.tf
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        continue-on-error: true
+
       - name: Download Terraform State
         uses: dawidd6/action-download-artifact@v2
         with:
@@ -42,7 +47,6 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
 
       - name: Terraform Destroy
-        # We must provide the variables again, even for destroy, to satisfy validation
         run: |
           terraform destroy -auto-approve \
             -var="ssh_public_key_path=./fake_key.pub" \
