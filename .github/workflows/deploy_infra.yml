@@ -1,0 +1,76 @@
+name: Deploy Infrastructure
+
+on:
+  workflow_dispatch: # Allows you to click a button to run this manually
+
+env:
+  # Path to your Terraform code
+  TF_WORKING_DIR: 'ManagedServices/alphv_blackcat/Resources/setup/provision/terraform/msr2'
+  AWS_REGION: 'us-east-1'
+
+jobs:
+  terraform:
+    name: "Terraform Apply"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.0
+
+      - name: Generate SSH Keys
+        # We generate a key on the fly so we don't have to manage files
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""
+          chmod 400 ~/.ssh/id_rsa
+          echo "SSH Key generated successfully"
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }} # Needed for Torque/Sandbox accounts
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Remove Remote Backend Config
+        # We delete backend.tf to force local state storage, making it easier to manage artifacts
+        run: rm -f backend.tf
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        continue-on-error: true
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Terraform Apply
+        # We map the generic LAB_PASSWORD to all the required variables
+        # We also pass the path to the SSH key we just generated
+        run: |
+          terraform apply -auto-approve \
+            -var="ssh_public_key_path=~/.ssh/id_rsa.pub" \
+            -var="ssh_private_key_path=~/.ssh/id_rsa" \
+            -var="dev_win_admin_password=${{ secrets.LAB_PASSWORD }}" \
+            -var="win_srv_admin_password=${{ secrets.LAB_PASSWORD }}" \
+            -var="dev_linux_username=adminuser" \
+            -var="dev_linux_password=${{ secrets.LAB_PASSWORD }}" \
+            -var="win_srv_admin_username=adminuser" \
+            -var="win_domain_name=example.local" \
+            -var="win_netbios_name=example" \
+            -var="charge_code=StudentLab" \
+            -var="aws-bucket-name=unused-bucket-placeholder"
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Upload Terraform State
+        # CRITICAL: We save the state file so we can destroy the lab later!
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-state
+          path: ${{ env.TF_WORKING_DIR }}/terraform.tfstate
